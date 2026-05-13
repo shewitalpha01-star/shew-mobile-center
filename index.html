@@ -1711,11 +1711,6 @@ async function studentRegister() {
   showStudentDashboard();
   showToast('Account created! Welcome, '+name+'!','success');
 }
-      showStudentDashboard();
-      showToast('Account created! Welcome, '+studentName,'success');
-    } else showToast(res.error||'Registration failed','error');
-  } catch(e){ showToast('Server unavailable','error'); }
-}
 
 function studentLogout() {
   studentToken=''; studentName=''; studentId='';
