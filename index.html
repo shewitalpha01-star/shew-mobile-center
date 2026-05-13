@@ -891,8 +891,6 @@ function getCourseById(id) {
   const all = getCourses();
   return all.find(c => String(c.id) === String(id)) || null;
 }
-  return getCourses().find(function (c) { return c.id === id; });
-}
 
 function escapeHtml(text) {
   if (text == null) return '';
