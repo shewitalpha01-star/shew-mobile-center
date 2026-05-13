@@ -366,7 +366,7 @@ footer span{color:#e94560}
   </div>
   <div class="nav-links">
     <a onclick="showSection('home')" class="active" id="nav-home">Home</a>
-    <a onclick="showSection('products')" id="nav-products">d:\Telegram Desktop\photo_1_2026-05-09_01-04-31.jpg Phones</a>
+    <a onclick="showSection('products')" id="nav-products">📱 Phones</a>
     <a onclick="showSection('cameras')" id="nav-cameras">📷 Cameras</a>
     <a onclick="showSection('electronics')" id="nav-electronics">🖥️ Electronics</a>
     <a onclick="showSection('courses')" id="nav-courses">🎓 Courses</a>
@@ -1360,33 +1360,30 @@ function closeEnrollModal(){document.getElementById('enrollModal').classList.rem
 async function enrollNow(){
   if(!selectedCourse)return;
   closeEnrollModal();
-  if(selectedCourse.price===0){
-    if(studentToken){
-      const en = await enrollAfterPayment(selectedCourse.id, null);
-      if(en && en.success){
-        showToast('Enrolled in '+selectedCourse.name+'!','success');
-        showSection('mycourses');
-      } else {
-        showToast((en && en.error) || 'Could not enroll. Try again or contact support.','error');
-      }
-    } else {
-      openWhatsApp();
-      showToast('Redirecting to WhatsApp for free enrollment!','success');
-    }
-  } else {
-    if(!studentToken){
-      showToast('Please login to your student account first to track your course','success');
-      showSection('mycourses');
-      return;
-    }
-    selectedProduct={id:selectedCourse.id,name:selectedCourse.name,price:selectedCourse.price,stock:true};
-    document.getElementById('selName').textContent=selectedCourse.name;
-    document.getElementById('selPrice').textContent=selectedCourse.price.toLocaleString()+' ETB';
-    appliedDiscount=0;appliedCouponCode=null;
-    document.getElementById('couponDisplay').style.display='none';
-    showSection('payment');
-    showToast('Selected course: '+selectedCourse.name,'success');
+
+  // Offline enrollment — save to localStorage
+  const key = 'offline_enrollments_'+(studentId||'guest');
+  const existing = JSON.parse(localStorage.getItem(key)||'[]');
+  const alreadyEnrolled = existing.find(function(e){ return String(e.course_id)===String(selectedCourse.id); });
+  if(!alreadyEnrolled) {
+    existing.push({ course_id: String(selectedCourse.id), enrolled_at: new Date().toISOString() });
+    localStorage.setItem(key, JSON.stringify(existing));
   }
+
+  if(selectedCourse.price === 0) {
+    showToast('Enrolled in '+selectedCourse.name+'!','success');
+    showSection('mycourses');
+    return;
+  }
+
+  // Paid course — go to payment
+  selectedProduct = { id: selectedCourse.id, name: selectedCourse.name, price: selectedCourse.price, stock: true };
+  document.getElementById('selName').textContent = selectedCourse.name;
+  document.getElementById('selPrice').textContent = selectedCourse.price.toLocaleString()+' ETB';
+  appliedDiscount=0; appliedCouponCode=null;
+  document.getElementById('couponDisplay').style.display='none';
+  showSection('payment');
+  showToast('Selected course: '+selectedCourse.name,'success');
 }
 function selectAccessory(id,name,price){selectedProduct={id,name,price,stock:true};document.getElementById('selName').textContent=name;document.getElementById('selPrice').textContent=price.toLocaleString()+' ETB';appliedDiscount=0;appliedCouponCode=null;document.getElementById('couponDisplay').style.display='none';showSection('payment');showToast('Selected: '+name,'success');}
 function selectProduct(id){const p=getProducts().find(x=>x.id==id);if(!p){showToast('Product not found','error');return;}if(p.stock<=0){showToast('Product out of stock','error');return;}selectedProduct=p;document.getElementById('selName').textContent=p.name;document.getElementById('selPrice').textContent=Number(p.price).toLocaleString()+' ETB';appliedDiscount=0;appliedCouponCode=null;document.getElementById('couponDisplay').style.display='none';showSection('payment');showToast('Selected: '+p.name,'success');}
@@ -1650,17 +1647,32 @@ async function studentLogin() {
   const phone = document.getElementById('loginPhone').value.trim();
   const pass = document.getElementById('loginPass').value.trim();
   if(!phone||!pass){showToast('Enter phone and password','error');return;}
+  // Try API first
   try {
     const res = await apiPost('student_login',{phone,password:pass});
     if(res.success){
-      studentToken=res.token; studentName=res.name; studentId=res.id;
+      studentToken=res.token||'offline'; studentName=res.name; studentId=res.id||phone;
       localStorage.setItem('shewit_student_token',studentToken);
       localStorage.setItem('shewit_student_name',studentName);
       localStorage.setItem('shewit_student_id',studentId);
       showStudentDashboard();
       showToast('Welcome back, '+studentName+'!','success');
-    } else showToast(res.error||'Login failed','error');
-  } catch(e){ showToast('Server unavailable','error'); }
+      return;
+    }
+  } catch(e){}
+  // Offline fallback — check localStorage
+  const offlineUsers = JSON.parse(localStorage.getItem('offline_students')||'[]');
+  const user = offlineUsers.find(function(u){ return u.phone===phone && u.pass===pass; });
+  if(user) {
+    studentToken='offline'; studentName=user.name; studentId=user.phone;
+    localStorage.setItem('shewit_student_token','offline');
+    localStorage.setItem('shewit_student_name',user.name);
+    localStorage.setItem('shewit_student_id',user.phone);
+    showStudentDashboard();
+    showToast('Welcome back, '+user.name+'!','success');
+  } else {
+    showToast('Invalid phone or password','error');
+  }
 }
 
 async function studentRegister() {
@@ -1672,13 +1684,33 @@ async function studentRegister() {
   if(!name||!phone||!pass){showToast('Fill all required fields','error');return;}
   if(pass!==pass2){showToast('Passwords do not match','error');return;}
   if(pass.length<6){showToast('Password must be at least 6 characters','error');return;}
+  // Try API first
   try {
     const res = await apiPost('student_register',{name,phone,email,password:pass});
     if(res.success){
-      studentToken=res.token; studentName=res.name; studentId=res.id;
+      studentToken=res.token||'offline'; studentName=res.name||name; studentId=res.id||phone;
       localStorage.setItem('shewit_student_token',studentToken);
       localStorage.setItem('shewit_student_name',studentName);
       localStorage.setItem('shewit_student_id',studentId);
+      showStudentDashboard();
+      showToast('Welcome, '+studentName+'!','success');
+      return;
+    }
+  } catch(e){}
+  // Offline fallback — save to localStorage
+  const offlineUsers = JSON.parse(localStorage.getItem('offline_students')||'[]');
+  if(offlineUsers.find(function(u){ return u.phone===phone; })){
+    showToast('Phone already registered','error'); return;
+  }
+  offlineUsers.push({name,phone,email,pass});
+  localStorage.setItem('offline_students', JSON.stringify(offlineUsers));
+  studentToken='offline'; studentName=name; studentId=phone;
+  localStorage.setItem('shewit_student_token','offline');
+  localStorage.setItem('shewit_student_name',name);
+  localStorage.setItem('shewit_student_id',phone);
+  showStudentDashboard();
+  showToast('Account created! Welcome, '+name+'!','success');
+}
       showStudentDashboard();
       showToast('Account created! Welcome, '+studentName,'success');
     } else showToast(res.error||'Registration failed','error');
@@ -1719,43 +1751,45 @@ async function showStudentDashboard() {
 async function loadEnrolledCourses() {
   const grid = document.getElementById('enrolledCoursesGrid');
   grid.innerHTML = '<p style="color:#aaa;text-align:center;padding:40px">Loading your courses...</p>';
+  await loadCoursesFromAPI();
+
+  // Try API, fall back to localStorage enrollments
+  let enrollments = [];
   try {
-    await loadCoursesFromAPI();
     const res = await apiStudentGet('get_my_enrollments');
-    if(!res.success){
-      if(res.error==='Not logged in'){studentLogout();return;}
-      grid.innerHTML = '<p style="color:#e94560;text-align:center;padding:40px">'+(res.error||'Error')+'</p>';
-      return;
-    }
-    const enrollments = res.enrollments||[];
-    if(enrollments.length===0){
-      grid.innerHTML = '<div class="no-courses-box"><div class="icon">📚</div><h3 style="color:#1a1a2e;margin-bottom:8px">No courses yet</h3><p>Enroll in a course to start learning</p><button class="hero-btn" style="margin-top:16px;background:#9b59b6" onclick="showSection(\'courses\')">Browse Courses</button></div>';
-      return;
-    }
-    const cards = await Promise.all(enrollments.map(async function(e){
-      const course = getCourseById(e.course_id);
-      if(!course) return '';
-      let lessons=[], progressData=[];
-      try{
-        lessons = await apiStudentGet('get_course_lessons',{course_id:e.course_id});
-        progressData = await apiStudentGet('get_lesson_progress',{course_id:e.course_id});
-      }catch(err){}
-      const total = Array.isArray(lessons)?lessons.length:0;
-      const done = Array.isArray(progressData)?progressData.filter(p=>p.completed==1).length:0;
-      const pct = total>0?Math.round(done/total*100):0;
-      return '<div class="enrolled-card" onclick="openCourseViewer(\''+e.course_id+'\')">'+
-        '<div class="enrolled-banner" style="background:'+course.bg+'">'+course.emoji+'</div>'+
-        '<div class="enrolled-info">'+
-          '<h3>'+course.name+'</h3>'+
-          '<div class="enrolled-meta">by '+course.instructor+' · '+course.duration+'</div>'+
-          '<div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:'+pct+'%"></div></div>'+
-          '<div class="progress-text">'+done+' / '+total+' lessons completed ('+pct+'%)</div>'+
-          '<button class="continue-btn">'+(done===0?'▶ Start Learning':'▶ Continue Learning')+'</button>'+
-        '</div>'+
-      '</div>';
-    }));
-    grid.innerHTML = cards.join('');
-  } catch(e){ grid.innerHTML = '<p style="color:#e94560;text-align:center;padding:40px">Could not load courses. Make sure you are connected to the server.</p>'; }
+    if(res && res.success) {
+      enrollments = res.enrollments || [];
+    } else { throw new Error('offline'); }
+  } catch(e) {
+    // Load from localStorage
+    enrollments = JSON.parse(localStorage.getItem('offline_enrollments_'+(studentId||'guest'))||'[]');
+  }
+
+  if(enrollments.length === 0) {
+    grid.innerHTML = '<div class="no-courses-box"><div class="icon">📚</div><h3 style="color:#1a1a2e;margin-bottom:8px">No courses yet</h3><p>Enroll in a course to start learning</p><button class="hero-btn" style="margin-top:16px;background:#9b59b6" onclick="showSection(\'courses\')">Browse Courses</button></div>';
+    return;
+  }
+
+  const cards = enrollments.map(function(e) {
+    const course = getCourseById(e.course_id);
+    if(!course) return '';
+    const lessons = course.lessons || [];
+    const total = lessons.length;
+    const saved = JSON.parse(localStorage.getItem('progress_'+course.id)||'{}');
+    const done = Object.values(saved).filter(Boolean).length;
+    const pct = total > 0 ? Math.round(done/total*100) : 0;
+    return '<div class="enrolled-card" onclick="openCourseViewer(\''+course.id+'\')">'+
+      '<div class="enrolled-banner" style="background:'+course.bg+'">'+course.emoji+'</div>'+
+      '<div class="enrolled-info">'+
+        '<h3>'+course.name+'</h3>'+
+        '<div class="enrolled-meta">by '+course.instructor+' · '+course.duration+'</div>'+
+        '<div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:'+pct+'%"></div></div>'+
+        '<div class="progress-text">'+done+' / '+total+' lessons completed ('+pct+'%)</div>'+
+        '<button class="continue-btn">'+(done===0?'▶ Start Learning':'▶ Continue Learning')+'</button>'+
+      '</div>'+
+    '</div>';
+  });
+  grid.innerHTML = cards.join('');
 }
 
 async function openCourseViewer(courseId) {
@@ -1769,13 +1803,35 @@ async function openCourseViewer(courseId) {
   document.getElementById('currentLessonTitle').textContent = 'Select a lesson to start';
   document.getElementById('currentLessonDesc').textContent = course.desc;
   document.getElementById('videoArea').innerHTML = '<div class="video-placeholder"><span>'+course.emoji+'</span><p>Select a lesson from the list →</p></div>';
+
+  // Try API first, fall back to embedded lessons in FALLBACK_COURSES
   try {
-    currentLessons = await apiStudentGet('get_course_lessons',{course_id:courseId});
-    if(!Array.isArray(currentLessons)) currentLessons=[];
+    const apiLessons = await apiStudentGet('get_course_lessons',{course_id:courseId});
+    if(Array.isArray(apiLessons) && apiLessons.length) {
+      currentLessons = apiLessons;
+    } else {
+      throw new Error('no lessons from API');
+    }
+  } catch(e) {
+    // Use embedded lessons from FALLBACK_COURSES
+    currentLessons = (course.lessons || []).map(function(l,i){
+      return { id: l.id||('l'+(i+1)), title: l.title, youtube_url: l.youtube_url, duration: l.duration||'' };
+    });
+  }
+
+  // Load progress from API or localStorage
+  lessonProgress = {};
+  try {
     const progressData = await apiStudentGet('get_lesson_progress',{course_id:courseId});
-    lessonProgress = {};
-    if(Array.isArray(progressData)) progressData.forEach(function(p){lessonProgress[p.lesson_id]=p.completed==1;});
-  } catch(e){ currentLessons=[]; lessonProgress={}; }
+    if(Array.isArray(progressData)) {
+      progressData.forEach(function(p){ lessonProgress[p.lesson_id]=p.completed==1; });
+    } else { throw new Error('no progress'); }
+  } catch(e) {
+    // Load from localStorage
+    const saved = JSON.parse(localStorage.getItem('progress_'+courseId)||'{}');
+    lessonProgress = saved;
+  }
+
   renderLessonList();
   updateViewerProgress();
 }
@@ -1817,6 +1873,10 @@ async function playLesson(lessonId) {
   renderLessonList(lessonId);
   if(!lessonProgress[lessonId]) {
     lessonProgress[lessonId] = true;
+    // Save to localStorage always
+    if(currentViewingCourse) {
+      localStorage.setItem('progress_'+currentViewingCourse.id, JSON.stringify(lessonProgress));
+    }
     try { await apiStudentPost('mark_lesson',{lesson_id:lessonId,completed:true}); } catch(e){}
     renderLessonList(lessonId);
     updateViewerProgress();
